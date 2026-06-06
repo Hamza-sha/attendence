@@ -1,0 +1,1453 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>نظام الحضور بالباركود الذكي</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<!-- Barcode generator -->
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+<!-- Barcode scanner (ZXing) -->
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
+<style>
+/* ══════ TOKENS ══════ */
+:root {
+  --bg:       #f5f7fa;
+  --surface:  #ffffff;
+  --surface2: #eef1f6;
+  --border:   #dde1ea;
+  --border2:  #c8cdd8;
+  --accent:   #2563eb;
+  --accent2:  #1d4ed8;
+  --green:    #16a34a;
+  --orange:   #ea580c;
+  --red:      #dc2626;
+  --yellow:   #ca8a04;
+  --text:     #111827;
+  --text2:    #4b5563;
+  --text3:    #9ca3af;
+  --font:     'Cairo', sans-serif;
+  --mono:     'JetBrains Mono', monospace;
+  --r:        10px;
+  --r2:       14px;
+}
+
+/* ══════ RESET ══════ */
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:var(--font); background:var(--bg); color:var(--text); min-height:100vh; line-height:1.5; }
+input, select, textarea, button { font-family:var(--font); }
+a { color:inherit; text-decoration:none; }
+code { font-family:var(--mono); }
+
+/* ══════ SCREENS ══════ */
+.screen { display:none; }
+.screen.active { display:block; }
+#appScreen.active { display:flex; flex-direction:column; min-height:100vh; }
+
+/* ══════ SETUP / AUTH SCREENS ══════ */
+.auth-bg {
+  min-height:100vh; display:flex; align-items:center; justify-content:center;
+  background: radial-gradient(ellipse 80% 60% at 50% 0%, #1a2744 0%, var(--bg) 70%);
+  padding:20px;
+  position:relative; overflow:hidden;
+}
+.auth-bg::before {
+  content:''; position:absolute; inset:0; pointer-events:none;
+  background:
+    repeating-linear-gradient(90deg, transparent, transparent 79px, rgba(37,99,235,.07) 80px),
+    repeating-linear-gradient(0deg,  transparent, transparent 79px, rgba(37,99,235,.07) 80px);
+}
+.auth-card {
+  background:var(--surface); border:1px solid var(--border2);
+  border-radius:18px; padding:36px 32px; width:100%; max-width:460px;
+  position:relative; z-index:1;
+  box-shadow: 0 0 0 1px rgba(37,99,235,.08), 0 32px 64px rgba(0,0,0,.5);
+}
+.auth-card.wide { max-width:540px; }
+.card-logo { text-align:center; margin-bottom:28px; }
+.card-logo .logo-icon { font-size:40px; display:block; margin-bottom:10px; }
+.card-logo h1 { font-size:19px; font-weight:700; letter-spacing:-.3px; }
+.card-logo p  { font-size:12px; color:var(--text2); margin-top:4px; }
+
+/* steps */
+.steps { display:flex; align-items:center; justify-content:center; gap:0; margin-bottom:26px; }
+.step-node {
+  width:30px; height:30px; border-radius:50%; border:2px solid var(--border2);
+  display:flex; align-items:center; justify-content:center;
+  font-size:11px; font-weight:700; color:var(--text2); flex-shrink:0;
+}
+.step-node.active { border-color:var(--accent); background:var(--accent); color:#fff; }
+.step-node.done   { border-color:var(--green);  background:var(--green);  color:#fff; }
+.step-edge { width:36px; height:2px; background:var(--border2); }
+.step-edge.done  { background:var(--green); }
+
+/* form */
+.fg { margin-bottom:14px; }
+.fg label { display:block; font-size:11px; font-weight:700; color:var(--text2); margin-bottom:5px; letter-spacing:.5px; text-transform:uppercase; }
+.fg input, .fg select {
+  width:100%; padding:10px 13px; background:#ffffff; border:1px solid var(--border2);
+  border-radius:var(--r); color:var(--text); font-size:14px; outline:none; transition:border-color .15s;
+}
+.fg input:focus, .fg select:focus { border-color:var(--accent); }
+.fg .sub { font-size:11px; color:var(--text2); margin-top:4px; }
+.row2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+
+/* buttons */
+.btn {
+  display:inline-flex; align-items:center; justify-content:center; gap:7px;
+  padding:9px 18px; border-radius:var(--r); border:none; cursor:pointer;
+  font-size:13px; font-weight:700; transition:all .15s; white-space:nowrap;
+}
+.btn-primary   { background:var(--accent);  color:#fff; }
+.btn-primary:hover  { background:var(--accent2); }
+.btn-success   { background:var(--green);   color:#fff; }
+.btn-danger    { background:var(--red);     color:#fff; }
+.btn-ghost     { background:transparent; border:1px solid var(--border2); color:var(--text2); }
+.btn-ghost:hover { border-color:var(--accent); color:var(--accent); }
+.btn-del       { background:rgba(220,38,38,.1); color:var(--red); border:1px solid rgba(220,38,38,.25); }
+.btn-del:hover { background:rgba(220,38,38,.18); }
+.btn-sm  { padding:5px 12px; font-size:12px; }
+.btn-full{ width:100%; padding:12px; font-size:15px; margin-top:4px; }
+.btn:disabled  { opacity:.45; cursor:not-مسموح; }
+
+/* pass strength */
+.pbar { height:3px; border-radius:2px; background:#e5e7eb; margin-top:5px; transition:all .3s; }
+.pbar.w { background:var(--red);    width:33%; }
+.pbar.m { background:var(--yellow); width:66%; }
+.pbar.s { background:var(--green);  width:100%; }
+.prule  { font-size:11px; color:var(--text2); display:flex; align-items:center; gap:5px; margin-top:3px; }
+.prule.ok { color:var(--green); }
+
+/* alerts */
+.alert { padding:11px 14px; border-radius:var(--r); font-size:13px; margin:8px 0; }
+.alert-err  { background:rgba(220,38,38,.08);  border:1px solid rgba(220,38,38,.25);  color:#f87171; }
+.alert-ok   { background:rgba(22,163,74,.08);   border:1px solid rgba(22,163,74,.25);   color:#4ade80; }
+.alert-info { background:rgba(37,99,235,.1);   border:1px solid rgba(37,99,235,.25);   color:#93c5fd; }
+.alert-warn { background:rgba(234,88,12,.1);   border:1px solid rgba(234,88,12,.25);   color:#fdba74; }
+
+/* role tabs */
+.tabs { display:flex; gap:4px; background:var(--bg); border-radius:var(--r); padding:4px; margin-bottom:20px; }
+.tab  { flex:1; padding:8px; text-align:center; border-radius:8px; cursor:pointer; font-size:13px; font-weight:600; color:var(--text2); transition:all .2s; }
+.tab.active { background:var(--accent); color:#fff; }
+
+/* ══════ TOPBAR ══════ */
+.topbar {
+  height:54px; background:var(--surface); border-bottom:1px solid var(--border);
+  display:flex; align-items:center; padding:0 20px; gap:14px; position:sticky; top:0; z-index:200;
+  flex-shrink:0;
+}
+.topbar-logo { font-size:14px; font-weight:700; flex:1; display:flex; align-items:center; gap:8px; }
+.topbar-logo .dot { width:8px; height:8px; border-radius:50%; background:var(--accent); }
+.topbar-logo span { color:var(--text2); font-weight:400; font-size:12px; }
+.user-pill {
+  display:flex; align-items:center; gap:7px; background:var(--bg);
+  padding:4px 12px; border-radius:20px; border:1px solid var(--border2); font-size:12px;
+}
+.user-pill .live { width:6px; height:6px; border-radius:50%; background:var(--green); }
+
+/* ══════ LAYOUT ══════ */
+.layout { display:flex; flex:1; overflow:hidden; }
+.sidebar {
+  width:210px; background:var(--surface); border-left:1px solid var(--border);
+  padding:12px 0; flex-shrink:0; overflow-y:auto; display:flex; flex-direction:column;
+}
+.nav-section { padding:6px 16px 2px; font-size:10px; font-weight:700; color:var(--text3); letter-spacing:1px; text-transform:uppercase; }
+.nav-item {
+  display:flex; align-items:center; gap:10px; padding:9px 16px;
+  cursor:pointer; font-size:13px; font-weight:600; color:var(--text2);
+  border-right:3px solid transparent; transition:all .15s;
+}
+.nav-item:hover { color:var(--text); background:rgba(37,99,235,.06); }
+.nav-item.active { color:var(--accent); background:rgba(37,99,235,.1); border-right-color:var(--accent); }
+.nav-item .icon { font-size:16px; flex-shrink:0; }
+.main { flex:1; padding:22px; overflow-y:auto; }
+
+/* ══════ PAGE ══════ */
+.page-hdr { display:flex; align-items:center; gap:12px; margin-bottom:20px; flex-wrap:wrap; }
+.page-hdr h2 { font-size:19px; font-weight:700; flex:1; }
+.page-hdr .sub { font-size:12px; color:var(--text2); font-weight:400; }
+
+/* ══════ STATS ══════ */
+.stats-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:20px; }
+.stat {
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--r2); padding:16px;
+  display:flex; flex-direction:column; gap:4px;
+}
+.stat .lbl { font-size:11px; color:var(--text2); font-weight:600; }
+.stat .val { font-size:28px; font-weight:900; line-height:1; }
+.stat .hint { font-size:11px; color:var(--text2); }
+.v-blue   { color:var(--accent); }
+.v-green  { color:var(--green); }
+.v-orange { color:var(--orange); }
+.v-red    { color:var(--red); }
+
+/* ══════ CARD / TABLE ══════ */
+.card { background:var(--surface); border:1px solid var(--border); border-radius:var(--r2); overflow:hidden; margin-bottom:16px; }
+.card-hdr { display:flex; align-items:center; justify-content:space-between; padding:13px 16px; border-bottom:1px solid var(--border); }
+.card-hdr h3 { font-size:13px; font-weight:700; }
+.card-body { padding:16px; }
+table { width:100%; border-collapse:collapse; }
+th { padding:9px 14px; text-align:right; font-size:11px; color:var(--text2); font-weight:700; border-bottom:1px solid var(--border); background:rgba(0,0,0,.04); letter-spacing:.3px; }
+td { padding:9px 14px; font-size:13px; border-bottom:1px solid rgba(33,38,45,.7); }
+tr:last-child td { border-bottom:none; }
+tr:hover td { background:rgba(37,99,235,.04); }
+
+/* ══════ BADGE ══════ */
+.badge { display:inline-flex; align-items:center; gap:4px; padding:2px 9px; border-radius:20px; font-size:11px; font-weight:700; }
+.badge-safe   { background:rgba(37,99,235,.12);  color:#93c5fd; border:1px solid rgba(37,99,235,.3); }
+.badge-warn   { background:rgba(234,88,12,.12);  color:#fdba74; border:1px solid rgba(234,88,12,.3); }
+.badge-danger { background:rgba(220,38,38,.1);  color:#f87171; border:1px solid rgba(220,38,38,.3); }
+.badge-banned { background:rgba(200,205,216,.4);    color:#6b7280; border:1px solid #374151; }
+.badge-ok     { background:rgba(22,163,74,.12);  color:#4ade80; border:1px solid rgba(22,163,74,.3); }
+
+/* ══════ BARCODE ══════ */
+.barcode-box {
+  background:#fff; border-radius:8px; padding:12px 16px; display:inline-block; text-align:center;
+}
+.barcode-box svg { display:block; }
+.barcode-box .bc-label { font-family:var(--mono); font-size:11px; color:#111; margin-top:4px; letter-spacing:1px; }
+
+/* ══════ SCANNER ══════ */
+.scan-wrap { position:relative; border-radius:12px; overflow:hidden; background:#000; aspect-ratio:4/3; margin-bottom:12px; }
+.scan-wrap video { width:100%; height:100%; object-fit:cover; display:block; }
+.scan-overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; }
+.scan-frame { width:200px; height:100px; position:relative; }
+.sc { position:absolute; width:22px; height:22px; border-color:#2563eb; border-style:solid; border-width:0; }
+.sc.tl { top:0;left:0; border-top-width:3px; border-left-width:3px; }
+.sc.tr { top:0;right:0; border-top-width:3px; border-right-width:3px; }
+.sc.bl { bottom:0;left:0; border-bottom-width:3px; border-left-width:3px; }
+.sc.br { bottom:0;right:0; border-bottom-width:3px; border-right-width:3px; }
+.scan-line { position:absolute; left:0; right:0; height:2px; background:linear-gradient(90deg,transparent,#2563eb,transparent); animation:scanAnim 1.8s ease-in-out infinite; }
+@keyframes scanAnim { 0%{top:5%} 50%{top:95%} 100%{top:5%} }
+.cam-stop { position:absolute; bottom:8px; right:8px; background:rgba(0,0,0,.65); color:#fff; border:1px solid rgba(255,255,255,.2); border-radius:7px; padding:4px 12px; cursor:pointer; font-size:12px; font-family:var(--font); }
+
+/* ══════ PROGRESS ══════ */
+.prog-bg { background:#e5e7eb; border-radius:6px; height:8px; overflow:hidden; border:1px solid var(--border); }
+.prog-fill { height:100%; border-radius:6px; transition:width .5s; }
+
+/* ══════ BIG COUNTER ══════ */
+.big-counter { text-align:center; padding:24px 0; }
+.big-counter .num { font-size:76px; font-weight:900; line-height:1; }
+.big-counter .lbl { font-size:13px; color:var(--text2); margin-top:6px; }
+
+/* ══════ GPS STATUS ══════ */
+.gps-checking { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text2); padding:12px; }
+.spinner { width:16px; height:16px; border:2px solid var(--border2); border-top-color:var(--accent); border-radius:50%; animation:spin .7s linear infinite; flex-shrink:0; }
+@keyframes spin { to{ transform:rotate(360deg); } }
+
+/* ══════ MODAL ══════ */
+.overlay { display:none; position:fixed; inset:0; background:rgba(15,23,42,.6); z-index:500; align-items:center; justify-content:center; padding:16px; }
+.overlay.open { display:flex; }
+.modal { background:var(--surface); border:1px solid var(--border2); border-radius:16px; padding:24px; width:100%; max-width:460px; }
+.modal h3 { font-size:16px; font-weight:700; margin-bottom:18px; }
+.modal-footer { display:flex; gap:8px; justify-content:flex-end; margin-top:20px; }
+
+/* ══════ MISC ══════ */
+.divider { display:flex; align-items:center; gap:10px; color:var(--text3); font-size:11px; margin:12px 0; }
+.divider::before,.divider::after { content:''; flex:1; height:1px; background:var(--border); }
+.info-box { background:rgba(37,99,235,.06); border:1px solid rgba(37,99,235,.18); border-radius:var(--r); padding:12px; font-size:12px; color:#93c5fd; line-height:1.8; }
+.warn-box { background:rgba(220,38,38,.06); border:1px solid rgba(220,38,38,.18); border-radius:var(--r); padding:12px; font-size:12px; color:#f87171; line-height:1.8; }
+.flex-row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+.live-dot { width:7px; height:7px; border-radius:50%; background:var(--red); animation:pulse 1.2s ease infinite; display:inline-block; margin-left:5px; }
+@keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(1.5)} }
+@keyframes shake { 0%,100%{transform:translateX(0)} 20%{transform:translateX(-7px)} 40%{transform:translateX(7px)} 60%{transform:translateX(-4px)} 80%{transform:translateX(4px)} }
+.loc-box { background:#f0f4ff; border:1px solid var(--border2); border-radius:var(--r); padding:11px 14px; font-size:12px; color:var(--text2); text-align:center; margin-top:6px; }
+.loc-box.set { border-color:var(--green); color:#4ade80; }
+.scan-ok  { background:rgba(22,163,74,.08); border:1px solid rgba(22,163,74,.25); border-radius:var(--r); padding:13px; font-weight:700; font-size:14px; text-align:center; color:#4ade80; margin-top:10px; }
+.scan-err { background:rgba(220,38,38,.08); border:1px solid rgba(220,38,38,.25); border-radius:var(--r); padding:13px; font-weight:700; font-size:14px; text-align:center; color:#f87171; margin-top:10px; }
+.empty-state { text-align:center; padding:32px; color:var(--text2); font-size:13px; }
+.empty-state .ei { font-size:32px; display:block; margin-bottom:8px; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════
+     SCREEN: SETUP (First Run)
+═══════════════════════════════════════ -->
+<div id="setupScreen" class="screen">
+  <div class="auth-bg">
+    <div class="auth-card wide">
+      <div class="card-logo">
+        <span class="logo-icon">🏛️</span>
+        <h1>نظام الحضور بالباركود الذكي</h1>
+        <p>الإعداد الأول — ضبط بيانات مؤسستك</p>
+      </div>
+      <div class="steps" id="setupSteps">
+        <div class="step-node active" id="sn1">1</div>
+        <div class="step-edge" id="se1"></div>
+        <div class="step-node" id="sn2">2</div>
+        <div class="step-edge" id="se2"></div>
+        <div class="step-node" id="sn3">3</div>
+      </div>
+
+      <!-- Step 1: Institution -->
+      <div id="sp1">
+        <div class="fg"><label>اسم الجامعة / المؤسسة</label><input id="s_uni" placeholder="مثال: جامعة الأردن" /></div>
+        <div class="fg"><label>الكلية / القسم</label><input id="s_dept" placeholder="مثال: كلية علوم الحاسوب" /></div>
+        <div class="fg"><label>السنة الدراسية</label><input id="s_year" placeholder="مثال: 2024/2025" /></div>
+        <div id="s1err" class="alert alert-err" style="display:none"></div>
+        <button type="button" class="btn btn-primary btn-full" onclick="sNext(1)">التالي ←</button>
+      </div>
+
+      <!-- Step 2: GPS Location -->
+      <div id="sp2" style="display:none">
+        <p style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.8">
+          📍 حدد موقع جامعتك's GPS location.<br>
+          يجب أن يكون الطلاب ضمن <strong style="color:var(--accent)" id="radiusLabel">200</strong>م لتسجيل الحضور.
+        </p>
+        <button type="button" class="btn btn-primary" style="width:100%;margin-bottom:8px" onclick="detectSetupGPS()">
+          📡 استخدم موقعي الحالي (أنا في الجامعة الآن)
+        </button>
+        <div class="divider">أو أدخل يدوياً</div>
+        <div class="row2">
+          <div class="fg"><label>خط العرض</label><input type="number" id="s_lat" placeholder="31.9539" step="any" oninput="updateLocBox()" /></div>
+          <div class="fg"><label>خط الطول</label><input type="number" id="s_lng" placeholder="35.9106" step="any" oninput="updateLocBox()" /></div>
+        </div>
+        <div class="fg">
+          <label>النطاق المسموح (متر): <strong style="color:var(--accent)" id="rv">200</strong>m</label>
+          <input type="range" id="s_radius" min="50" max="1000" step="50" value="200"
+            oninput="document.getElementById('rv').textContent=this.value;document.getElementById('radiusLabel').textContent=this.value"
+            style="width:100%;margin-top:6px;accent-color:var(--accent)" />
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text2);margin-top:2px"><span>50m</span><span>1000m</span></div>
+        </div>
+        <div class="loc-box" id="locBox">لم يتم تحديد الموقع بعد</div>
+        <div id="s2err" class="alert alert-err" style="display:none;margin-top:8px"></div>
+        <div class="flex-row" style="margin-top:12px">
+          <button type="button" class="btn btn-ghost" style="flex:1" onclick="sBack(2)">← رجوع</button>
+          <button type="button" class="btn btn-primary" style="flex:2" onclick="sNext(2)">التالي ←</button>
+        </div>
+      </div>
+
+      <!-- Step 3: الإدارة Account -->
+      <div id="sp3" style="display:none">
+        <p style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.8">
+          👨‍🏫 أنشئ أول حساب مشرف (أدمن).<br>
+          يمكن إضافة مشرفين آخرين لاحقاً من لوحة التحكم.
+        </p>
+        <div class="fg"><label>الاسم الكامل</label><input id="s_name" placeholder="مثال: د. أحمد الرشيد" /></div>
+        <div class="fg"><label>اسم المستخدم</label><input id="s_user" placeholder="مثال: dr.ahmad" style="direction:ltr" /><div class="sub">بالإنجليزية فقط، بدون مسافات</div></div>
+        <div class="fg"><label>كلمة المرور</label><input type="password" id="s_pass" placeholder="8 أحرف على الأقل" oninput="setupPassBar()" /><div class="pbar" id="spbar"></div></div>
+        <div class="fg"><label>تأكيد كلمة المرور</label><input type="password" id="s_pass2" placeholder="أعد إدخال كلمة المرور" /></div>
+        <div id="s3err" class="alert alert-err" style="display:none;margin-top:4px"></div>
+        <div class="flex-row" style="margin-top:12px">
+          <button type="button" class="btn btn-ghost" style="flex:1" onclick="sBack(3)">← رجوع</button>
+          <button type="button" class="btn btn-success" style="flex:2;padding:12px" onclick="finishSetup()">🚀 تشغيل النظام 🚀</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════
+     SCREEN: LOGIN
+═══════════════════════════════════════ -->
+<div id="loginScreen" class="screen">
+  <div class="auth-bg">
+    <div class="auth-card">
+      <div class="card-logo">
+        <span class="logo-icon">🎓</span>
+        <h1 id="loginTitle">نظام الحضور الذكي System</h1>
+        <p id="loginSub">سجّل دخولك للمتابعة</p>
+      </div>
+      <div class="tabs">
+        <div class="tab active" onclick="setRole('student')">👨‍🎓 طالب</div>
+        <div class="tab" onclick="setRole('instructor')">👨‍🏫 مشرف</div>
+      </div>
+      <div id="studentFields">
+        <div class="fg"><label>الرقم الجامعي</label><input id="l_sid" placeholder="مثال: 2020901164" /></div>
+      </div>
+      <div id="instructorFields" style="display:none">
+        <div class="fg"><label>اسم المستخدم</label><input id="l_user" placeholder="مثال: dr.ahmad" style="direction:ltr" /></div>
+      </div>
+      <div class="fg"><label>كلمة المرور</label><input type="password" id="l_pass" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()" /></div>
+      <div id="loginErr" class="alert alert-err" style="display:none"></div>
+      <button type="button" class="btn btn-primary btn-full" onclick="doLogin()">تسجيل الدخول</button>
+      <div id="loginHint" style="margin-top:14px;font-size:11px;color:var(--text2);text-align:center;line-height:2"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════
+     SCREEN: CHANGE PASSWORD
+═══════════════════════════════════════ -->
+<div id="changePassScreen" class="screen">
+  <div class="auth-bg">
+    <div class="auth-card" style="border-color:rgba(37,99,235,.4)">
+      <div class="card-logo">
+        <span class="logo-icon">🔐</span>
+        <h1>Change Your كلمة المرور</h1>
+        <p id="cpSub">يجب تغيير كلمة المرور الافتراضية قبل المتابعة</p>
+      </div>
+      <div class="fg">
+        <label>New كلمة المرور</label>
+        <input type="password" id="cp1" placeholder="6 أحرف على الأقل" oninput="cpBar()" />
+        <div class="pbar" id="cpBarEl"></div>
+        <div id="cpRules" style="margin-top:6px">
+          <div class="prule" id="cpr1">○ 6 أحرف على الأقل</div>
+          <div class="prule" id="cpr2">○ مختلفة عن كلمة المرور الافتراضية</div>
+        </div>
+      </div>
+      <div class="fg">
+        <label>تأكيد كلمة المرور</label>
+        <input type="password" id="cp2" placeholder="أعد الإدخال" oninput="cpMatch()" />
+        <div id="cpMatchMsg" style="font-size:11px;min-height:15px;margin-top:3px"></div>
+      </div>
+      <div id="cpErr" class="alert alert-err" style="display:none;margin-bottom:8px"></div>
+      <button type="button" class="btn btn-success btn-full" onclick="submitCP()">✅ حفظ والمتابعة ✅</button>
+      <div style="text-align:center;margin-top:12px">
+        <button type="button" onclick="doLogout()" style="background:none;border:none;color:var(--text2);font-size:11px;cursor:pointer;text-decoration:underline;font-family:var(--font)">رجوع لتسجيل الدخول</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════
+     SCREEN: APP
+═══════════════════════════════════════ -->
+<div id="appScreen" class="screen">
+  <div class="topbar">
+    <div class="topbar-logo">
+      <div class="dot"></div>
+      <div>
+        <div id="topTitle">نظام الحضور الذكي</div>
+        <span id="topSub"></span>
+      </div>
+    </div>
+    <div class="user-pill"><div class="live"></div><span id="userPill">—</span></div>
+    <button type="button" class="btn btn-ghost btn-sm" onclick="doLogout()">خروج</button>
+  </div>
+  <div class="layout">
+    <div class="sidebar" id="sidebar"></div>
+    <div class="main" id="mainContent"></div>
+  </div>
+</div>
+
+<!-- MODAL -->
+<div class="overlay" id="modalOv">
+  <div class="modal">
+    <h3 id="mTitle"></h3>
+    <div id="mBody"></div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+      <button type="button" class="btn btn-primary" id="mOkBtn" style="display:none" onclick="mOkAction()">تأكيد</button>
+    </div>
+  </div>
+</div>
+
+<!-- DELETE CONFIRM -->
+<div class="overlay" id="delOv">
+  <div class="modal" style="max-width:360px;text-align:center">
+    <div style="font-size:36px;margin-bottom:10px">⚠️</div>
+    <h3 id="delTitle" style="text-align:center;margin-bottom:8px"></h3>
+    <p id="delBody" style="color:var(--text2);font-size:13px;margin-bottom:20px"></p>
+    <div style="display:flex;gap:10px;justify-content:center">
+      <button type="button" class="btn btn-ghost" onclick="closeDel()">إلغاء</button>
+      <button type="button" class="btn btn-danger" onclick="confirmDel()">حذف</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+// ═══════════════════════════════════════
+// DB  (localStorage)
+// ═══════════════════════════════════════
+function loadDB() { try { return JSON.parse(localStorage.getItem('sas_db') || 'null'); } catch { return null; } }
+function saveDB() { localStorage.setItem('sas_db', JSON.stringify(DB)); }
+
+let DB = loadDB() || {
+  setup: false,
+  uni:   { name:'', dept:'', year:'', lat:null, lng:null, radius:200 },
+  instructors: [],   // { id, name, username, pass, mustChange }
+  students:    [],   // { id, name, pass, mustChangePass, absences, banned }
+  sessions:    [],   // { id, date, token, حضر:[] }
+  courses:     [],   // { id, name, maxAbsences }
+};
+
+// ═══════════════════════════════════════
+// RUNTIME
+// ═══════════════════════════════════════
+let role = 'student';
+let user = null;
+let cpType = '';
+let qrInterval = null, qrSec = 30;
+let todayAttended = [];
+let camStream = null, camRAF = null, zxReader = null;
+let delCb = null;
+let _modalOk = null;
+
+// ═══════════════════════════════════════
+// BOOT
+// ═══════════════════════════════════════
+function boot() {
+  if (!DB.setup) { show('setupScreen'); }
+  else {
+    show('loginScreen');
+    document.getElementById('loginTitle').textContent = DB.uni.name || 'نظام الحضور الذكي System';
+    document.getElementById('loginSub').textContent   = DB.uni.dept || '';
+    document.getElementById('loginHint').innerHTML =
+      '🔑 Student default password = الرقم الجامعي<br>👨‍🏫 مشرف: use your username & password';
+  }
+}
+
+function show(id) {
+  ['setupScreen','loginScreen','changePassScreen','appScreen'].forEach(s => {
+    const el = document.getElementById(s);
+    el.classList.toggle('active', s === id);
+  });
+}
+
+function g(id) { return document.getElementById(id); }
+function gv(id) { return g(id).value.trim(); }
+function setHtml(id, html) { g(id).innerHTML = html; }
+
+// ═══════════════════════════════════════
+// SETUP WIZARD
+// ═══════════════════════════════════════
+let SD = {};
+
+function sNext(step) {
+  if (step === 1) {
+    const uni = gv('s_uni'), dept = gv('s_dept'), year = gv('s_year');
+    if (!uni) { showAlert('s1err','اسم الجامعة مطلوب'); return; }
+    SD.uni = uni; SD.dept = dept; SD.year = year;
+    hideAlert('s1err');
+    goStep(2);
+  } else if (step === 2) {
+    const lat = parseFloat(g('s_lat').value), lng = parseFloat(g('s_lng').value);
+    if (isNaN(lat) || isNaN(lng)) { showAlert('s2err','يرجى تحديد الموقع الجغرافي'); return; }
+    SD.lat = lat; SD.lng = lng;
+    SD.radius = parseInt(g('s_radius').value);
+    hideAlert('s2err');
+    goStep(3);
+  }
+}
+function sBack(step) { goStep(step - 1); }
+
+function goStep(n) {
+  [1,2,3].forEach(i => {
+    g('sp'+i).style.display = i===n ? 'block' : 'none';
+    const nd = g('sn'+i);
+    nd.className = 'step-node' + (i < n ? ' done' : i===n ? ' active' : '');
+    if (i < 3) g('se'+i).className = 'step-edge' + (i < n ? ' done' : '');
+  });
+}
+
+function detectSetupGPS() {
+  if (!navigator.geolocation) { showAlert('s2err','المتصفح لا يدعم GPS'); return; }
+  showAlert('s2err','⏳ جاري تحديد الموقع...', 'info');
+  navigator.geolocation.getCurrentPosition(pos => {
+    const la = pos.coords.latitude.toFixed(6), ln = pos.coords.longitude.toFixed(6);
+    g('s_lat').value = la; g('s_lng').value = ln;
+    hideAlert('s2err');
+    updateLocBox();
+  }, () => showAlert('s2err','تعذر تحديد الموقع. أدخل يدوياً.'));
+}
+
+function updateLocBox() {
+  const la = parseFloat(g('s_lat').value), ln = parseFloat(g('s_lng').value);
+  const box = g('locBox');
+  if (!isNaN(la) && !isNaN(ln)) {
+    box.className = 'loc-box set';
+    box.textContent = `✅ ${la.toFixed(5)}, ${ln.toFixed(5)}`;
+  }
+}
+
+function setupPassBar() {
+  const v = g('s_pass').value, bar = g('spbar');
+  bar.className = 'pbar' + (v.length < 6 ? '' : v.length < 9 ? ' m' : ' s');
+}
+
+function finishSetup() {
+  const name = gv('s_name'), uname = gv('s_user').toLowerCase();
+  const pass = g('s_pass').value.trim(), pass2 = g('s_pass2').value.trim();
+  if (!name)              { showAlert('s3err','الاسم الكامل مطلوب'); return; }
+  if (!uname)             { showAlert('s3err','اسم المستخدم مطلوب'); return; }
+  if (/\s/.test(uname))  { showAlert('s3err','اسم المستخدم لا يحتوي مسافات'); return; }
+  if (pass.length < 6)   { showAlert('s3err','كلمة المرور قصيرة جداً (6 أحرف على الأقل)'); return; }
+  if (pass !== pass2)    { showAlert('s3err','كلمتا المرور غير متطابقتين'); return; }
+  if (!SD.uni)           { showAlert('s3err','يرجى العودة وإدخال بيانات الجامعة'); return; }
+
+  DB.uni         = { name:SD.uni, dept:SD.dept, year:SD.year, lat:SD.lat, lng:SD.lng, radius:SD.radius };
+  DB.instructors = [{ id:uid(), name, username:uname, pass, mustChange:false }];
+  DB.students    = [];
+  DB.sessions    = [];
+  DB.setup       = true;
+  saveDB();
+  toast('✅ تم إعداد النظام بنجاح! أهلاً وسهلاً.');
+  boot();
+}
+
+// ═══════════════════════════════════════
+// LOGIN
+// ═══════════════════════════════════════
+function setRole(r) {
+  role = r;
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', (i===0&&r==='student')||(i===1&&r==='instructor')));
+  g('studentFields').style.display    = r==='student'    ? 'block' : 'none';
+  g('instructorFields').style.display = r==='instructor' ? 'block' : 'none';
+  hideAlert('loginErr');
+  g('l_sid').value=''; g('l_user').value=''; g('l_pass').value='';
+}
+
+function doLogin() {
+  const pass = gv('l_pass');
+  hideAlert('loginErr');
+
+  if (role === 'instructor') {
+    const uname = gv('l_user').toLowerCase();
+    const ins = DB.instructors.find(d => d.username === uname);
+    if (!ins)            { shakeLogin(); showAlert('loginErr','اسم المستخدم not found'); return; }
+    if (pass !== ins.pass) { shakeLogin(); showAlert('loginErr','كلمة المرور غير صحيحة'); return; }
+    user = { role:'instructor', data:ins };
+    ins.mustChange ? openCP('instructor') : launchApp();
+
+  } else {
+    const sid = gv('l_sid');
+    const stu = DB.students.find(s => s.id === sid);
+    if (!stu)              { shakeLogin(); showAlert('loginErr','الرقم الجامعي not found — contact your instructor'); return; }
+    if (pass !== stu.pass) { shakeLogin(); showAlert('loginErr','كلمة المرور غير صحيحة'); return; }
+    user = { role:'student', data:stu };
+    stu.mustChangePass ? openCP('student') : launchApp();
+  }
+}
+
+function shakeLogin() {
+  const c = document.querySelector('#loginScreen .auth-card');
+  c.style.animation = 'shake .4s ease';
+  setTimeout(() => c.style.animation='', 400);
+}
+
+// ═══════════════════════════════════════
+// CHANGE PASSWORD
+// ═══════════════════════════════════════
+function openCP(type) {
+  cpType = type;
+  g('cpSub').textContent = type==='student'
+    ? `Welcome ${user.data.name}! Your default password is your الرقم الجامعي.`
+    : `مرحباً ${user.data.name}! يرجى تغيير كلمة المرور المؤقتة.`;
+  ['cp1','cp2'].forEach(id => g(id).value='');
+  g('cpBarEl').className='pbar';
+  hideAlert('cpErr');
+  g('cpMatchMsg').textContent='';
+  show('changePassScreen');
+}
+
+function cpBar() {
+  const v = gv('cp1'), def = cpType==='student' ? user.data.id : '';
+  g('cpr1').className='prule'+(v.length>=6?' ok':'');
+  g('cpr1').textContent=(v.length>=6?'✓':'○')+' 6 أحرف على الأقل';
+  g('cpr2').className='prule'+(v!==def&&v.length>0?' ok':'');
+  g('cpr2').textContent=(v!==def&&v.length>0?'✓':'○')+' Different from default password';
+  g('cpBarEl').className='pbar'+(v.length<6?'':v.length<9?' m':' s');
+  cpMatch();
+}
+
+function cpMatch() {
+  const v1=gv('cp1'), v2=gv('cp2'), msg=g('cpMatchMsg');
+  if (!v2) { msg.textContent=''; return; }
+  msg.style.color = v1===v2 ? '#4ade80':'#f87171';
+  msg.textContent = v1===v2 ? '✓ كلمتا المرور متطابقتان' : '✗ كلمتا المرور غير متطابقتين';
+}
+
+function submitCP() {
+  const v1=gv('cp1'), v2=gv('cp2'), def=cpType==='student'?user.data.id:'';
+  if (v1.length<6)  { showAlert('cpErr','كلمة المرور too short'); return; }
+  if (v1===def)     { showAlert('cpErr','لا يمكن استخدام كلمة المرور الافتراضية'); return; }
+  if (v1!==v2)      { showAlert('cpErr','كلمتا المرور غير متطابقتين'); return; }
+
+  if (cpType==='student') {
+    const i=DB.students.findIndex(s=>s.id===user.data.id);
+    DB.students[i].pass=v1; DB.students[i].mustChangePass=false;
+    user.data.pass=v1; user.data.mustChangePass=false;
+  } else {
+    const i=DB.instructors.findIndex(d=>d.id===user.data.id);
+    DB.instructors[i].pass=v1; DB.instructors[i].mustChange=false;
+    user.data.pass=v1; user.data.mustChange=false;
+  }
+  saveDB();
+  launchApp();
+  toast('✅ كلمة المرور changed successfully!');
+}
+
+// ═══════════════════════════════════════
+// APP SHELL
+// ═══════════════════════════════════════
+function launchApp() {
+  g('topTitle').textContent  = DB.uni.name || 'نظام الحضور الذكي';
+  g('topSub').textContent    = DB.uni.dept || '';
+  g('userPill').textContent  = user.data.name;
+  buildSidebar();
+  show('appScreen');
+  nav(user.role==='instructor' ? 'dashboard' : 'myAbsences');
+}
+
+function doLogout() {
+  if (qrInterval) clearInterval(qrInterval);
+  stopCam();
+  user=null; todayAttended=[];
+  show('loginScreen');
+  setRole('student');
+}
+
+function buildSidebar() {
+  const isIns = user.role==='instructor';
+  const links = isIns ? [
+    { sec:'القائمة الرئيسية' },
+    { id:'dashboard',   icon:'📊', label:'لوحة التحكم' },
+    { id:'takeAtt',     icon:'📷', label:'تسجيل الحضور' },
+    { sec:'السجلات' },
+    { id:'students',    icon:'👥', label:'الطلاب' },
+    { id:'sessions',    icon:'📅', label:'الجلسات' },
+    { id:'reports',     icon:'📄', label:'التقارير' },
+    { sec:'الإدارة' },
+    { id:'instructors', icon:'👨‍🏫', label:'المشرفون' },
+    { id:'settings',    icon:'⚙️',  label:'الإعدادات' },
+  ] : [
+    { id:'myAbsences', icon:'📈', label:'غياباتي' },
+    { id:'myHistory',  icon:'📅', label:'سجل الحضور' },
+    { id:'scanBarcode',icon:'📷', label:'مسح الباركود' },
+    { id:'myBarcode',  icon:'🔲', label:'باركودي' },
+  ];
+  g('sidebar').innerHTML = links.map(l => l.sec
+    ? `<div class="nav-section">${l.sec}</div>`
+    : `<div class="nav-item" id="ni_${l.id}" onclick="nav('${l.id}')"><span class="icon">${l.icon}</span>${l.label}</div>`
+  ).join('');
+}
+
+function nav(page) {
+  document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
+  const ni = g('ni_'+page);
+  if (ni) ni.classList.add('active');
+  if (qrInterval && page!=='takeAtt') { clearInterval(qrInterval); qrInterval=null; }
+  if (page!=='scanBarcode') stopCam();
+  renderPage(page);
+}
+
+function renderPage(page) {
+  const pages = { dashboard, takeAtt, students, sessions, reports, instructors, settings, myAbsences, myHistory, scanBarcode, myBarcode };
+  g('mainContent').innerHTML = '';
+  (pages[page] || (() => html('<p style="color:var(--text2)">قريباً</p>')))();
+}
+
+function html(content) { g('mainContent').innerHTML = content; }
+
+// ═══════════════════════════════════════
+// ── INSTRUCTOR PAGES ──
+// ═══════════════════════════════════════
+
+// DASHBOARD
+function dashboard() {
+  const إجمالي   = DB.students.length;
+  const banned  = DB.students.filter(s=>s.banned).length;
+  const danger  = DB.students.filter(s=>!s.banned&&s.absences>=4).length;
+  const warn    = DB.students.filter(s=>!s.banned&&s.absences>=2&&s.absences<4).length;
+  const safe    = DB.students.filter(s=>!s.banned&&s.absences<2).length;
+  html(`
+    <div class="page-hdr"><h2>لوحة التحكم <span class="sub">${DB.uni.name}</span></h2></div>
+    <div class="stats-grid">
+      <div class="stat"><div class="lbl">Total الطلاب</div><div class="val v-blue">${إجمالي}</div></div>
+      <div class="stat"><div class="lbl">🟢 آمن (0-1)</div><div class="val v-green">${safe}</div></div>
+      <div class="stat"><div class="lbl">🟠 تحذير (2-3)</div><div class="val v-orange">${warn}</div></div>
+      <div class="stat"><div class="lbl">🔴 خطر + محروم</div><div class="val v-red">${danger+banned}</div></div>
+    </div>
+    ${إجمالي===0 ? `<div class="info-box">
+      <strong>النظام جاهز!</strong><br>
+      ابدأ بإضافة الطلاب من قسم <strong>الطلاب</strong> ثم انتقل إلى <strong>تسجيل الحضور</strong> لبدء جلسة.
+    </div>` : `
+    <div class="card">
+      <div class="card-hdr"><h3>⛔ محروم الطلاب (${banned})</h3></div>
+      ${banned===0
+        ? `<div class="empty-state"><span class="ei">🎉</span>لا يوجد طلاب محرومون</div>`
+        : `<table><thead><tr><th>الرقم الجامعي</th><th>الاسم</th><th>الغيابات</th></tr></thead><tbody>
+          ${DB.students.filter(s=>s.banned).map(s=>`
+            <tr><td><code style="color:var(--accent)">${s.id}</code></td><td>${s.name}</td>
+            <td><span class="badge badge-banned">⛔ ${s.absences}</span></td></tr>`).join('')}
+          </tbody></table>`}
+    </div>`}
+  `);
+}
+
+// TAKE ATTENDANCE
+function takeAtt() {
+  const dateStr = new Date().toLocaleDateString('en-GB',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+  html(`
+    <div class="page-hdr">
+      <h2>تسجيل الحضور <div class="live-dot"></div></h2>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="endSession()">⏹ إنهاء الجلسة</button>
+    </div>
+
+    <!-- Barcode display -->
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-hdr">
+        <h3>📊 باركود الجلسة</h3>
+        <div class="flex-row">
+          <span style="font-size:11px;color:var(--text2)">يتجدد خلال <strong id="bcTimer" style="color:var(--accent)">30</strong>s</span>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="newToken()">🔄 تجديد</button>
+        </div>
+      </div>
+      <div class="card-body" style="display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap">
+        <div>
+          <div class="barcode-box" id="bcBox"><svg id="bcSvg"></svg></div>
+        </div>
+        <div style="flex:1;min-width:200px">
+          <div style="font-size:13px;color:var(--text2);line-height:1.9">
+            اعرض هذا الباركود على الشاشة ليمسحه الطلاب بهواتفهم.<br>
+            يتجدد تلقائياً كل <strong>30 seconds</strong> to prevent fraud.
+          </div>
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+            <div style="background:var(--bg);border:1px solid var(--border2);border-radius:8px;padding:6px 12px;font-size:11px;color:var(--text2)">📅 <strong>${dateStr}</strong></div>
+            <div style="background:var(--bg);border:1px solid var(--border2);border-radius:8px;padding:6px 12px;font-size:11px;color:var(--text2)">✅ <strong id="attCount">${todayAttended.length}</strong> حضر</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Two columns -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+      <div class="card">
+        <div class="card-hdr"><h3 style="color:#4ade80">✅ الحاضرون (${todayAttended.length})</h3></div>
+        <table><thead><tr><th>الاسم</th><th>Time</th></tr></thead><tbody id="presentList">
+          ${todayAttended.length===0
+            ? `<tr><td colspan="2" style="text-align:center;color:var(--text2);padding:16px">لا يوجد بعد</td></tr>`
+            : todayAttended.map(a=>`<tr><td>${a.name}</td><td style="direction:ltr;text-align:right;color:var(--text2)">${a.time}</td></tr>`).join('')}
+        </tbody></table>
+      </div>
+      <div class="card">
+        <div class="card-hdr"><h3 style="color:#f87171">❌ الغائبون (${DB.students.length-todayAttended.length})</h3></div>
+        <table><thead><tr><th>الاسم</th><th>Total</th></tr></thead><tbody>
+          ${DB.students.filter(s=>!todayAttended.find(a=>a.id===s.id)).map(s=>`
+            <tr><td>${s.name}</td><td>${absBadge(s)}</td></tr>`).join('')
+            || `<tr><td colspan="2" style="text-align:center;color:#4ade80;padding:16px">الجميع حضر! 🎉</td></tr>`}
+        </tbody></table>
+      </div>
+    </div>
+
+    <!-- Manual entry -->
+    <div class="card">
+      <div class="card-hdr">
+        <h3>⌨️ إدخال يدوي</h3>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="markAll()">تسجيل الكل حاضر</button>
+      </div>
+      <div class="card-body">
+        <div class="flex-row">
+          <input id="manIn" placeholder="Enter الرقم الجامعي..." style="flex:1;padding:9px 13px;background:var(--bg);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);font-size:14px;font-family:var(--font);outline:none"
+            onkeydown="if(event.key==='Enter')manMark()" />
+          <button type="button" class="btn btn-primary" onclick="manMark()">إضافة</button>
+        </div>
+        <div id="manRes" style="margin-top:8px"></div>
+      </div>
+    </div>
+  `);
+  startBCTimer();
+}
+
+let _bcToken = '';
+function startBCTimer() {
+  if (qrInterval) clearInterval(qrInterval);
+  newToken(); qrSec=30;
+  qrInterval = setInterval(() => {
+    qrSec--;
+    const el = g('bcTimer'); if(el) el.textContent=qrSec;
+    if (qrSec<=0) { newToken(); qrSec=30; }
+  }, 1000);
+}
+
+function newToken() {
+  qrSec=30;
+  _bcToken = 'SAS-'+Date.now()+'-'+Math.random().toString(36).substr(2,6).toUpperCase();
+  const svg = g('bcSvg');
+  if (!svg) return;
+  try {
+    JsBarcode(svg, _bcToken, {
+      format:'CODE128', width:2, height:70, displayValue:false,
+      lineColor:'#111', background:'#ffffff', margin:0
+    });
+    // add label below
+    const lbl = document.createElement('div');
+    lbl.className='bc-label'; lbl.textContent=_bcToken.slice(-8);
+    const box = g('bcBox');
+    const old = box.querySelector('.bc-label');
+    if (old) box.removeChild(old);
+    box.appendChild(lbl);
+  } catch(e) { svg.innerHTML='<text x="10" y="40" fill="#333">'+_bcToken+'</text>'; }
+}
+
+function endSession() {
+  if (!confirm('إنهاء الجلسة وتسجيل الغيابات؟')) return;
+  DB.students.forEach(s => {
+    if (!todayAttended.find(a=>a.id===s.id)) { s.absences++; if(s.absences>6) s.banned=true; }
+  });
+  DB.sessions.push({ id:uid(), date:new Date().toLocaleDateString('en-GB'), token:_bcToken, attended:todayAttended.map(a=>a.id) });
+  saveDB();
+  if(qrInterval){clearInterval(qrInterval);qrInterval=null;}
+  toast(`✅ Session ended. الحاضرون: ${todayAttended.length} / ${DB.students.length}`);
+  todayAttended=[];
+  nav('dashboard');
+}
+
+function manMark() {
+  const val=gv('manIn'), st=DB.students.find(s=>s.id===val), res=g('manRes');
+  if(!st){res.innerHTML='<div class="scan-err">❌ الرقم الجامعي not found</div>';return;}
+  if(todayAttended.find(a=>a.id===st.id)){res.innerHTML='<div class="scan-err">⚠️ مسجّل مسبقاً</div>';return;}
+  todayAttended.push({id:st.id,name:st.name,time:new Date().toLocaleTimeString('en-GB')});
+  g('manIn').value='';
+  res.innerHTML=`<div class="scan-ok">✅ تم التسجيل: ${st.name}</div>`;
+  if(g('attCount')) g('attCount').textContent=todayAttended.length;
+  setTimeout(()=>takeAtt(),1200);
+}
+
+function markAll() {
+  DB.students.forEach(s=>{if(!todayAttended.find(a=>a.id===s.id)) todayAttended.push({id:s.id,name:s.name,time:new Date().toLocaleTimeString('en-GB')});});
+  takeAtt();
+}
+
+// STUDENTS
+function students() {
+  html(`
+    <div class="page-hdr">
+      <h2>الطلاب <span class="sub">${DB.students.length} إجمالي</span></h2>
+      <button type="button" class="btn btn-primary" onclick="openAddStudent()">+ إضافة طالب</button>
+    </div>
+    <div class="flex-row" style="margin-bottom:14px">
+      <input id="stuQ" placeholder="🔍 بحث بالاسم أو الرقم..." style="flex:1;padding:9px 13px;background:var(--surface);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);font-size:13px;font-family:var(--font);outline:none" oninput="filterStus()" />
+    </div>
+    <div class="card">
+      <table>
+        <thead><tr><th>الرقم الجامعي</th><th>الاسم</th><th>الغيابات</th><th>الحالة</th><th>إجراءات</th></tr></thead>
+        <tbody id="stuTbody">${stuRows(DB.students)}</tbody>
+      </table>
+      ${DB.students.length===0?`<div class="empty-state"><span class="ei">👥</span>لا يوجد طلاب بعد — أضف أول طالب</div>`:''}
+    </div>
+  `);
+}
+
+function stuRows(list) {
+  return list.map(s => {
+    const i = DB.students.indexOf(s);
+    return `<tr>
+      <td><code style="color:var(--accent)">${s.id}</code></td>
+      <td style="font-weight:600">${s.name}</td>
+      <td><strong style="font-size:15px">${s.absences}</strong></td>
+      <td>${absBadge(s)}</td>
+      <td><div class="flex-row">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="editAbs(${i})">✏️ Edit</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="showStudentBC(${i})">🔲 Barcode</button>
+        <button type="button" class="btn btn-del btn-sm" onclick="openDel(${i},'student')">🗑️</button>
+      </div></td>
+    </tr>`;
+  }).join('');
+}
+
+function filterStus() {
+  const q = g('stuQ').value.toLowerCase();
+  const filtered = DB.students.filter(s=>s.name.toLowerCase().includes(q)||s.id.includes(q));
+  g('stuTbody').innerHTML = stuRows(filtered);
+}
+
+function openAddStudent() {
+  openModal('إضافة New Student', `
+    <div class="fg"><label>الرقم الجامعي *</label><input id="m_sid" placeholder="مثال: 2020901164" /></div>
+    <div class="fg"><label>الاسم الكامل *</label><input id="m_sname" placeholder="مثال: سجى ناصر قصراوي" /></div>
+    <div class="info-box" style="margin-top:8px">
+      🔑 Default password = الرقم الجامعي<br>
+      🔄 سيُطلب من الطالب تغييرها عند أول دخول
+    </div>
+  `, true, () => {
+    const id=gv('m_sid'), name=gv('m_sname');
+    if(!id||!name){toast('❌ ID and الاسم are required');return false;}
+    if(DB.students.find(s=>s.id===id)){toast('❌ الرقم الجامعي already exists');return false;}
+    DB.students.push({id,name,pass:id,mustChangePass:true,absences:0,banned:false});
+    saveDB(); students();
+    toast(`✅ تم الإضافة: ${name}`);
+  });
+}
+
+function editAbs(i) {
+  const s=DB.students[i];
+  openModal(`Edit الغيابات — ${s.name}`, `
+    <div class="fg"><label>الغيابات (current: ${s.absences})</label>
+    <input type="number" id="m_abs" value="${s.absences}" min="0" max="30" /></div>
+  `, true, () => {
+    const v=parseInt(g('m_abs').value);
+    if(isNaN(v)||v<0){toast('❌ قيمة غير صحيحة');return false;}
+    DB.students[i].absences=v; DB.students[i].banned=v>6;
+    saveDB(); students(); toast('✅ تم التحديث');
+  });
+}
+
+function showStudentBC(i) {
+  const s=DB.students[i];
+  openModal(`باركود — ${s.name}`, `
+    <div style="text-align:center">
+      <div class="barcode-box" style="display:inline-block;margin:0 auto">
+        <svg id="stuBcSvg"></svg>
+        <div class="bc-label">${s.id}</div>
+      </div>
+      <p style="margin-top:12px;font-size:12px;color:var(--text2)">اطبع أو اعرض هذا الباركود للطالب.</p>
+    </div>
+  `, false, null);
+  setTimeout(() => {
+    try { JsBarcode(g('stuBcSvg'), s.id, {format:'CODE128',width:2,height:60,displayValue:false,lineColor:'#111',background:'#fff',margin:0}); }
+    catch(e){}
+  }, 50);
+}
+
+// SESSIONS
+function sessions() {
+  html(`
+    <div class="page-hdr"><h2>الجلسات <span class="sub">${DB.sessions.length} إجمالي</span></h2></div>
+    ${DB.sessions.length===0
+      ? `<div class="empty-state"><span class="ei">📅</span>لا توجد جلسات مسجلة بعد</div>`
+      : `<div class="card"><table>
+        <thead><tr><th>#</th><th>التاريخ</th><th>الحاضرون</th><th>الغائبون</th></tr></thead>
+        <tbody>${DB.sessions.map((s,i)=>`
+          <tr>
+            <td style="color:var(--text2)">${i+1}</td>
+            <td>${s.date}</td>
+            <td><strong style="color:#4ade80">${s.attended.length}</strong></td>
+            <td><strong style="color:#f87171">${DB.students.length-s.attended.length}</strong></td>
+          </tr>`).join('')}
+        </tbody></table></div>`}
+  `);
+}
+
+// REPORTS
+function reports() {
+  html(`
+    <div class="page-hdr"><h2>التقارير</h2></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px">
+      <div class="stat" style="cursor:pointer" onclick="exportPDF()"><div style="font-size:26px">📄</div><div style="font-weight:700;margin-top:6px">تصدير PDF</div><div class="lbl">كشف الحضور الكامل</div></div>
+      <div class="stat" style="cursor:pointer" onclick="toast('تصدير Excel قريباً')"><div style="font-size:26px">📊</div><div style="font-weight:700;margin-top:6px">Export Excel</div><div class="lbl">ملف البيانات</div></div>
+    </div>
+    <div class="card">
+      <div class="card-hdr"><h3>إحصائيات الغياب</h3></div>
+      <div class="card-body">
+        ${DB.students.length===0
+          ? `<div class="empty-state" style="padding:16px"><span class="ei">📊</span>لا توجد بيانات بعد</div>`
+          : DB.students.map(s=>`
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:9px">
+            <div style="width:140px;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.name}</div>
+            <div class="prog-bg" style="flex:1"><div class="prog-fill" style="width:${Math.min(s.absences/7*100,100)}%;background:${absCol(s)}"></div></div>
+            <div style="width:24px;text-align:center;font-weight:700;font-size:12px;color:${absCol(s)}">${s.absences}</div>
+            ${absBadge(s)}
+          </div>`).join('')}
+      </div>
+    </div>
+  `);
+}
+
+function exportPDF() {
+  const w=window.open('','_blank');
+  w.document.write(`<html dir="ltr"><head><meta charset="UTF-8"><title>Attendance Report</title>
+  <style>body{font-family:Arial,sans-serif;padding:28px}h1{color:#1d4ed8}table{width:100%;border-collapse:collapse;margin-top:16px}th{background:#1d4ed8;color:#fff;padding:9px;text-align:left}td{padding:8px;border-bottom:1px solid #e5e7eb}</style></head>
+  <body><h1>كشف الحضور — ${DB.uni.name}</h1>
+  <p>القسم: ${DB.uni.dept} | التاريخ: ${new Date().toLocaleDateString()}</p>
+  <table><thead><tr><th>الرقم الجامعي</th><th>الاسم</th><th>الغيابات</th><th>الحالة</th></tr></thead>
+  <tbody>${DB.students.map(s=>`<tr><td>${s.id}</td><td>${s.name}</td><td>${s.absences}</td><td>${s.banned?'محروم':s.absences>=4?'خطر':s.absences>=2?'تحذير':'آمن'}</td></tr>`).join('')}</tbody>
+  </table></body></html>`);
+  w.document.close();
+  setTimeout(()=>w.print(),500);
+}
+
+// INSTRUCTORS
+function instructors() {
+  html(`
+    <div class="page-hdr">
+      <h2>المشرفون <span class="sub">${DB.instructors.length} إجمالي</span></h2>
+      <button type="button" class="btn btn-primary" onclick="openAddInstructor()">+ إضافة مشرف</button>
+    </div>
+    <div class="card">
+      <table>
+        <thead><tr><th>الاسم</th><th>اسم المستخدم</th><th>الحالة</th><th>إجراءات</th></tr></thead>
+        <tbody>
+          ${DB.instructors.map((d,i)=>`
+            <tr>
+              <td style="font-weight:600">${d.name}</td>
+              <td><code style="color:var(--accent);direction:ltr">${d.username}</code></td>
+              <td>${d.mustChange?'<span class="badge badge-warn">🔄 يجب تغيير الباسوورد</span>':'<span class="badge badge-ok">✅ نشط</span>'}</td>
+              <td><div class="flex-row">
+                <button type="button" class="btn btn-ghost btn-sm" onclick="resetPass(${i})">🔑 إعادة تعيين</button>
+                ${DB.instructors.length>1?`<button type="button" class="btn btn-del btn-sm" onclick="openDel(${i},'instructor')">🗑️</button>`:''}
+              </div></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  `);
+}
+
+function openAddInstructor() {
+  openModal('إضافة Instructor', `
+    <div class="fg"><label>الاسم الكامل *</label><input id="m_iname" placeholder="د. سارة المنصور" /></div>
+    <div class="fg"><label>اسم المستخدم *</label><input id="m_iuser" placeholder="dr.sara" style="direction:ltr" /><div class="sub">بالإنجليزية، بدون مسافات</div></div>
+    <div class="fg"><label>Temporary كلمة المرور *</label><input type="password" id="m_ipass" placeholder="ستُغيَّر عند أول دخول" /></div>
+    <div class="info-box">🔄 سيُطلب من المشرف تغيير كلمة المرور عند أول دخول</div>
+  `, true, () => {
+    const name=gv('m_iname'), uname=gv('m_iuser').toLowerCase(), pass=gv('m_ipass');
+    if(!name||!uname||!pass){toast('❌ جميع الحقول مطلوبة');return false;}
+    if(/\s/.test(uname)){toast('❌ اسم المستخدم cannot have spaces');return false;}
+    if(DB.instructors.find(d=>d.username===uname)){toast('❌ اسم المستخدم already exists');return false;}
+    DB.instructors.push({id:uid(),name,username:uname,pass,mustChange:true});
+    saveDB(); instructors();
+    toast(`✅ تم الإضافة: ${name}`);
+  });
+}
+
+function resetPass(i) {
+  openModal(`Reset كلمة المرور — ${DB.instructors[i].name}`, `
+    <div class="fg"><label>New Temporary كلمة المرور</label><input type="password" id="m_rpass" placeholder="6 أحرف على الأقل" /></div>
+    <div class="info-box">🔄 سيُطلب من المشرف تغييرها عند الدخول التالي</div>
+  `, true, () => {
+    const p=gv('m_rpass');
+    if(!p||p.length<4){toast('❌ كلمة المرور too short');return false;}
+    DB.instructors[i].pass=p; DB.instructors[i].mustChange=true;
+    saveDB(); instructors(); toast('✅ كلمة المرور reset');
+  });
+}
+
+// SETTINGS
+function settings() {
+  html(`
+    <div class="page-hdr"><h2>System الإعدادات</h2></div>
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-hdr"><h3>🏛️ بيانات المؤسسة</h3></div>
+      <div class="card-body">
+        <div class="row2">
+          <div class="fg"><label>University الاسم</label><input id="s_un" value="${DB.uni.name}" /></div>
+          <div class="fg"><label>القسم</label><input id="s_ud" value="${DB.uni.dept||''}" /></div>
+        </div>
+        <div class="row2">
+          <div class="fg"><label>خط العرض</label><input type="number" id="s_la" value="${DB.uni.lat||''}" step="any" /></div>
+          <div class="fg"><label>خط الطول</label><input type="number" id="s_lo" value="${DB.uni.lng||''}" step="any" /></div>
+        </div>
+        <div class="fg">
+          <label>نطاق GPS: <strong style="color:var(--accent)" id="rLabel">${DB.uni.radius}</strong>m</label>
+          <input type="range" id="s_rad" min="50" max="1000" step="50" value="${DB.uni.radius}"
+            oninput="g('rLabel').textContent=this.value" style="width:100%;margin-top:6px;accent-color:var(--accent)" />
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text2);margin-top:2px"><span>50m</span><span>1000m</span></div>
+        </div>
+        <div class="flex-row">
+          <button type="button" class="btn btn-primary" onclick="saveSettings()">💾 حفظ 💾</button>
+          <button type="button" class="btn btn-ghost" onclick="detectSettingsGPS()">📡 استخدم موقعي</button>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-hdr"><h3>⚠️ خطر Zone</h3></div>
+      <div class="card-body">
+        <button type="button" class="btn btn-danger" onclick="fullReset()">🗑️ مسح جميع البيانات وإعادة الإعداد</button>
+      </div>
+    </div>
+  `);
+}
+
+function saveSettings() {
+  DB.uni.name   = gv('s_un');
+  DB.uni.dept   = gv('s_ud');
+  DB.uni.lat    = parseFloat(g('s_la').value)||null;
+  DB.uni.lng    = parseFloat(g('s_lo').value)||null;
+  DB.uni.radius = parseInt(g('s_rad').value);
+  saveDB(); toast('✅ الإعدادات saved');
+}
+function detectSettingsGPS() {
+  navigator.geolocation.getCurrentPosition(pos=>{
+    g('s_la').value=pos.coords.latitude.toFixed(6);
+    g('s_lo').value=pos.coords.longitude.toFixed(6);
+    toast('✅ تم تحديد الموقع');
+  },()=>toast('❌ تعذر تحديد الموقع'));
+}
+function fullReset() {
+  if(confirm('سيمسح هذا جميع البيانات. هل أنت متأكد؟'))
+    if(confirm('تأكيد نهائي — لا يمكن التراجع!')) { localStorage.removeItem('sas_db'); location.reload(); }
+}
+
+// ═══════════════════════════════════════
+// ── STUDENT PAGES ──
+// ═══════════════════════════════════════
+
+function myAbsences() {
+  const s=user.data, max=6, pct=Math.min(s.absences/7*100,100), col=absCol(s);
+  const status = s.banned?'⛔ محروم':s.absences>=4?'🔴 خطر':s.absences>=2?'🟠 تحذير':'🟢 آمن';
+  html(`
+    <div class="page-hdr"><h2>غياباتي</h2></div>
+    <div class="card" style="max-width:480px">
+      <div class="card-body">
+        <div style="text-align:center;margin-bottom:16px">
+          <div style="font-size:17px;font-weight:700">${s.name}</div>
+          <div style="font-size:12px;color:var(--text2)">الرقم الجامعي: ${s.id}</div>
+        </div>
+        <div class="big-counter">
+          <div class="num" style="color:${col}">${s.absences}</div>
+          <div class="lbl">غياب من أصل ${max} مسموح</div>
+        </div>
+        <div class="prog-bg" style="margin:10px 0"><div class="prog-fill" style="width:${pct}%;background:${col}"></div></div>
+        <div style="text-align:center;font-size:20px;font-weight:700;margin:12px 0">${status}</div>
+        ${s.absences>=5&&!s.banned?`<div class="warn-box">⚠️ لديك ${s.absences} غياب. غياب واحد آخر وستكون محروماً!</div>`:''}
+        ${s.banned?`<div class="warn-box">⛔ لديك exceeded the absence limit and are banned from this course.</div>`:''}
+      </div>
+    </div>
+  `);
+}
+
+function myHistory() {
+  const sid=user.data.id;
+  html(`
+    <div class="page-hdr"><h2>سجل الحضور</h2></div>
+    ${DB.sessions.length===0
+      ? `<div class="empty-state"><span class="ei">📅</span>لا توجد جلسات مسجلة بعد</div>`
+      : `<div class="card"><table>
+        <thead><tr><th>#</th><th>التاريخ</th><th>الحالة</th></tr></thead>
+        <tbody>${DB.sessions.map((s,i)=>`
+          <tr><td style="color:var(--text2)">${i+1}</td><td>${s.date}</td>
+          <td>${s.attended.includes(sid)
+            ?'<span style="color:#4ade80;font-weight:700">✅ حاضر</span>'
+            :'<span style="color:#f87171;font-weight:700">❌ الغائبون</span>'}</td>
+          </tr>`).join('')}
+        </tbody></table></div>`}
+  `);
+}
+
+// MY BARCODE
+function myBarcode() {
+  html(`
+    <div class="page-hdr"><h2>باركودي</h2></div>
+    <div class="card" style="max-width:440px">
+      <div class="card-body" style="text-align:center">
+        <p style="color:var(--text2);font-size:13px;margin-bottom:16px">
+          اعرض هذا الباركود لمشرفك للتسجيل اليدوي، أو احفظه للرجوع إليه.
+        </p>
+        <div class="barcode-box" style="display:inline-block">
+          <svg id="myBcSvg"></svg>
+          <div class="bc-label">${user.data.id}</div>
+        </div>
+        <div style="margin-top:14px;font-size:13px;color:var(--text2)">${user.data.name}</div>
+      </div>
+    </div>
+  `);
+  setTimeout(()=>{
+    try{JsBarcode(g('myBcSvg'),user.data.id,{format:'CODE128',width:2,height:70,displayValue:false,lineColor:'#111',background:'#fff',margin:0});}catch(e){}
+  },50);
+}
+
+// SCAN BARCODE
+let stuGPS=null;
+
+function scanBarcode() {
+  stopCam(); stuGPS=null;
+  html(`
+    <div class="page-hdr"><h2>Scan باركود الجلسة</h2></div>
+    <div class="card" style="max-width:480px">
+      <div class="card-body">
+
+        <!-- Step 1: GPS -->
+        <div style="margin-bottom:20px">
+          <div style="font-size:13px;font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:8px">
+            <span style="background:var(--accent);color:#fff;border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-size:11px">1</span>
+            التحقق من موقع GPS
+          </div>
+          <div id="gpsArea">
+            <button type="button" class="btn btn-primary" style="width:100%" onclick="checkGPS()">📍 التحقق من موقعي 📍</button>
+          </div>
+        </div>
+
+        <!-- Step 2: Scan -->
+        <div id="scanArea" style="opacity:.4;pointer-events:none">
+          <div style="font-size:13px;font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:8px">
+            <span style="background:var(--accent);color:#fff;border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-size:11px">2</span>
+            Scan باركود الجلسة
+          </div>
+
+          <!-- Camera -->
+          <div id="camWrap" style="display:none">
+            <div class="scan-wrap">
+              <video id="camVid" autoplay playsinline muted></video>
+              <div class="scan-overlay"><div class="scan-frame">
+                <div class="sc tl"></div><div class="sc tr"></div>
+                <div class="sc bl"></div><div class="sc br"></div>
+                <div class="scan-line"></div>
+              </div></div>
+              <button type="button" class="cam-stop" onclick="stopCamScan()">✕ إيقاف ✕</button>
+            </div>
+            <canvas id="camCanvas" style="display:none"></canvas>
+          </div>
+
+          <div id="camErr" style="display:none" class="alert alert-err"></div>
+          <button type="button" id="openCamBtn" class="btn btn-ghost" style="width:100%;margin-bottom:10px" onclick="startCamScan()">📷 فتح الكاميرا للمسح 📷</button>
+
+          <div class="divider">أو أدخل الرمز يدوياً</div>
+          <div class="flex-row">
+            <input id="bcInput" placeholder="الصق رمز الباركود هنا..." style="flex:1;padding:9px 13px;background:var(--bg);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);font-size:13px;font-family:var(--font);direction:ltr;outline:none"
+              onkeydown="if(event.key==='Enter')verifyToken()" />
+            <button type="button" class="btn btn-success" onclick="verifyToken()">✅</button>
+          </div>
+          <div id="scanResult" style="margin-top:10px"></div>
+        </div>
+
+      </div>
+    </div>
+  `);
+}
+
+function checkGPS() {
+  const area=g('gpsArea');
+  area.innerHTML=`<div class="gps-checking"><div class="spinner"></div>جاري تحديد موقعك...</div>`;
+  if(!navigator.geolocation){area.innerHTML='<div class="alert alert-err">المتصفح لا يدعم GPS</div>';return;}
+  navigator.geolocation.getCurrentPosition(pos=>{
+    const dist = haversine(pos.coords.latitude,pos.coords.longitude,DB.uni.lat,DB.uni.lng);
+    stuGPS={lat:pos.coords.latitude,lng:pos.coords.longitude,dist};
+    if(dist<=DB.uni.radius||!DB.uni.lat){
+      area.innerHTML=`<div class="alert alert-ok">✅ تم التحقق من الموقع — ${Math.round(dist)}م من الحرم الجامعي</div>`;
+      const sa=g('scanArea'); sa.style.opacity='1'; sa.style.pointerEvents='';
+    } else {
+      area.innerHTML=`
+        <div class="alert alert-err">❌ أنت على بُعد ${Math.round(dist)}m بعيد — يجب أن تكون ضمن ${DB.uni.radius}م من الجامعة</div>
+        <button type="button" class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="checkGPS()">🔄 إعادة المحاولة 🔄</button>`;
+    }
+  },()=>{
+    area.innerHTML=`
+      <div class="alert alert-err">❌ تعذر تحديد الموقع</div>
+      <button type="button" class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="checkGPS()">🔄 إعادة المحاولة 🔄</button>`;
+  },{enableHighAccuracy:true,timeout:12000});
+}
+
+function startCamScan() {
+  const err=g('camErr'); err.style.display='none';
+  if(!navigator.mediaDevices?.getUserMedia){err.textContent='Camera not supported in this browser';err.style.display='block';return;}
+  navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}})
+    .then(stream=>{
+      camStream=stream;
+      g('camWrap').style.display='block';
+      g('openCamBtn').style.display='none';
+      const v=g('camVid'); v.srcObject=stream; v.play();
+      v.addEventListener('loadeddata',()=>{camRAF=requestAnimationFrame(scanFrameBC);},{once:true});
+    })
+    .catch(e=>{err.textContent='Could not access camera: '+(e.message||e);err.style.display='block';});
+}
+
+function stopCamScan() {
+  stopCam();
+  const w=g('camWrap'),b=g('openCamBtn');
+  if(w)w.style.display='none'; if(b)b.style.display='block';
+}
+
+function stopCam() {
+  if(camRAF){cancelAnimationFrame(camRAF);camRAF=null;}
+  if(camStream){camStream.getTracks().forEach(t=>t.stop());camStream=null;}
+}
+
+function scanFrameBC() {
+  const v=g('camVid'),c=g('camCanvas');
+  if(!v||!c||v.readyState!==v.HAVE_ENOUGH_DATA){camRAF=requestAnimationFrame(scanFrameBC);return;}
+
+  // Use ZXing if available for 1D barcodes, fallback to manual
+  if(window.ZXing){
+    const ctx=c.getContext('2d'); c.width=v.videoWidth; c.height=v.videoHeight; ctx.drawImage(v,0,0);
+    try {
+      const hints = new Map();
+      const formats = [ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.CODE_39];
+      hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
+      const reader = new ZXing.MultiFormatReader();
+      reader.setHints(hints);
+      const luminance = new ZXing.HTMLCanvasElementLuminanceSource(c);
+      const binaryBitmap = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(luminance));
+      const result = reader.decode(binaryBitmap);
+      if(result){stopCam();g('bcInput').value=result.getText();verifyToken(result.getText());return;}
+    } catch(e){ /* not found yet */ }
+  } else {
+    // Fallback: try jsQR for QR codes in case ZXing not loaded
+    if(window.jsQR){
+      const ctx=c.getContext('2d'); c.width=v.videoWidth; c.height=v.videoHeight; ctx.drawImage(v,0,0);
+      const code=window.jsQR(ctx.getImageData(0,0,c.width,c.height).data,c.width,c.height);
+      if(code){stopCam();g('bcInput').value=code.data;verifyToken(code.data);return;}
+    }
+  }
+  camRAF=requestAnimationFrame(scanFrameBC);
+}
+
+function verifyToken(val) {
+  const v=(val||gv('bcInput')).trim();
+  const res=g('scanResult');
+  if(!v){res.innerHTML='<div class="scan-err">❌ أدخل رمز الباركود</div>';return;}
+  if(!v.startsWith('SAS-')){res.innerHTML='<div class="scan-err">❌ رمز غير صالح — امسح باركود الجلسة</div>';return;}
+  if(_bcToken && v!==_bcToken){res.innerHTML='<div class="scan-err">❌ انتهت صلاحية الرمز — اطلب من المشرف تجديده</div>';return;}
+  const stu=user.data;
+  if(todayAttended.find(a=>a.id===stu.id)){res.innerHTML='<div class="scan-ok">✅ مسجّل مسبقاً for this session</div>';return;}
+  todayAttended.push({id:stu.id,name:stu.name,time:new Date().toLocaleTimeString('en-GB')});
+  res.innerHTML='<div class="scan-ok">✅ تم تسجيل الحضور بنجاح!</div>';
+  toast('✅ تم تسجيل الحضور! ✅');
+}
+
+// ═══════════════════════════════════════
+// DELETE
+// ═══════════════════════════════════════
+function openDel(i,type) {
+  const item=type==='student'?DB.students[i]:DB.instructors[i];
+  g('delTitle').textContent=type==='student'?'حذف طالب':'حذف مشرف';
+  g('delBody').innerHTML=`هل أنت متأكد من حذف <strong>${item.name}</strong>?<br><small style="color:var(--text2)">لا يمكن التراجع عن هذا الإجراء.</small>`;
+  delCb=()=>{ type==='student'?DB.students.splice(i,1):DB.instructors.splice(i,1); saveDB(); closeDel(); toast(`🗑️ تم الحذف: ${item.name}`); type==='student'?students():instructors(); };
+  g('delOv').classList.add('open');
+}
+function confirmDel(){if(delCb)delCb();}
+function closeDel(){g('delOv').classList.remove('open');delCb=null;}
+
+// ═══════════════════════════════════════
+// MODAL
+// ═══════════════════════════════════════
+function openModal(title,body,hasOk,onOk){
+  g('mTitle').textContent=title;
+  g('mBody').innerHTML=body;
+  g('mOkBtn').style.display=hasOk?'inline-flex':'none';
+  _modalOk=onOk;
+  g('modalOv').classList.add('open');
+}
+function mOkAction(){if(_modalOk&&_modalOk()!==false)closeModal();}
+function closeModal(){g('modalOv').classList.remove('open');}
+
+// ═══════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════
+function absBadge(s) {
+  if(s.banned||s.absences>6)return'<span class="badge badge-banned">⛔ محروم</span>';
+  if(s.absences>=4)return`<span class="badge badge-danger">🔴 ${s.absences}</span>`;
+  if(s.absences>=2)return`<span class="badge badge-warn">🟠 ${s.absences}</span>`;
+  return`<span class="badge badge-safe">🔵 ${s.absences}</span>`;
+}
+function absCol(s){
+  if(s.banned||s.absences>6)return'#6b7280';
+  if(s.absences>=4)return'#f87171';
+  if(s.absences>=2)return'#fdba74';
+  return'#93c5fd';
+}
+function haversine(la1,lo1,la2,lo2){
+  if(!la2||!lo2)return 0;
+  const R=6371000,dL=(la2-la1)*Math.PI/180,dO=(lo2-lo1)*Math.PI/180;
+  const a=Math.sin(dL/2)**2+Math.cos(la1*Math.PI/180)*Math.cos(la2*Math.PI/180)*Math.sin(dO/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+function uid(){return Date.now().toString(36)+Math.random().toString(36).substr(2,5);}
+
+function showAlert(id,msg,type='err'){
+  const el=g(id); el.className='alert alert-'+type; el.textContent=msg; el.style.display='block';
+}
+function hideAlert(id){ g(id).style.display='none'; }
+
+let _toastT;
+function toast(msg){
+  let t=g('_toast');
+  if(!t){t=document.createElement('div');t.id='_toast';t.style.cssText='position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1e293b;color:#f1f5f9;padding:10px 20px;border-radius:9px;border:1px solid #334155;font-family:var(--font);font-size:13px;z-index:9999;transition:opacity .3s;white-space:nowrap;box-shadow:0 8px 24px rgba(0,0,0,.4)';document.body.appendChild(t);}
+  t.textContent=msg;t.style.opacity='1';
+  if(_toastT)clearTimeout(_toastT);
+  _toastT=setTimeout(()=>{t.style.opacity='0';},3000);
+}
+
+// ═══════════════════════════════════════
+// START
+// ═══════════════════════════════════════
+boot();
+</script>
+
+<!-- jsQR for fallback -->
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+</body>
+</html>
